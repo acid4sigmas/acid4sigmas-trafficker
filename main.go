@@ -1,0 +1,97 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"io/ioutil"
+	"log"
+	"net/http"
+	"time"
+	"trafficker/websocket"
+)
+
+func DynamicRouter(w http.ResponseWriter, r *http.Request) {
+	log.Println("Received request in DynamicRouter")
+
+	requestMethod := r.Method
+	log.Printf("Request Method: %s\n", requestMethod)
+
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		log.Println("Error reading request body:", err)
+		http.Error(w, "Failed to read body", http.StatusInternalServerError)
+		return
+	}
+	defer r.Body.Close()
+
+	log.Printf("Request Body: %s\n", string(body))
+
+	response := map[string]interface{}{
+		"RequestMethod": requestMethod,
+		"FullURL":       r.URL.Path,
+		"RequestBody":   string(body),
+	}
+
+	log.Println("Calling HandleWebSocketRequest...")
+	responseData, err := websocket.HandleWebSocketRequest(response)
+	if err != nil {
+		log.Println("Error in HandleWebSocketRequest:", err)
+		http.Error(w, err.Error(), http.StatusGatewayTimeout)
+		return
+	}
+
+	log.Printf("Received response data: %s\n", string(responseData))
+
+	// Parse the response data to verify
+	var responsePayload map[string]interface{}
+	if err := json.Unmarshal(responseData, &responsePayload); err != nil {
+		log.Println("Error unmarshaling WebSocket response:", err)
+		http.Error(w, "Failed to process WebSocket response", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Response Payload: %+v\n", responsePayload)
+
+	jsonResponse, err := json.Marshal(responsePayload)
+	if err != nil {
+		log.Println("Error creating JSON response:", err)
+		http.Error(w, "Failed to create JSON response", http.StatusInternalServerError)
+		return
+	}
+
+	log.Println("Sending JSON response to client")
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(jsonResponse)
+}
+
+func checkHealth() {
+	go func() {
+		for {
+			log.Println("Health check initiated: Sending status check broadcast...")
+			websocket.BroadcastMessage("Status check!")
+			time.Sleep(1 * time.Minute)
+		}
+	}()
+}
+
+func main() {
+	fmt.Println("Hello, World!")
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "index.html")
+	})
+	http.HandleFunc("/api", DynamicRouter)
+	http.HandleFunc("/ws", websocket.HandleConnection)
+
+	go func() {
+		log.Println("Starting HTTP server on :8080")
+		if err := http.ListenAndServe(":8080", nil); err != nil {
+			log.Fatal("HTTP server failed:", err)
+		}
+	}()
+
+	checkHealth()
+
+	for {
+		time.Sleep(time.Second)
+	}
+}
