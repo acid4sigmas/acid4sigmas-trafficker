@@ -126,7 +126,7 @@ func BroadcastMessageToFirstNode(response map[string]interface{}) {
 
 	if len(clients) == 0 {
 		log.Println("No clients connected!")
-		return
+		return // we need to implement here proper error handling
 	}
 
 	var firstClientId string
@@ -151,30 +151,22 @@ func BroadcastMessageToFirstNode(response map[string]interface{}) {
 }
 
 func HandleWebSocketRequest(response map[string]interface{}) ([]byte, error) {
-	log.Println("HandleWebSocketRequest called")
-
 	responseID := uuid.New().String()
-	log.Printf("Generated ResponseID: %s\n", responseID)
 
 	responseChannel := make(chan []byte)
 
 	clientsMux.Lock()
-	log.Printf("Adding ResponseID %s to pendingRequests\n", responseID)
 	pendingRequests[responseID] = responseChannel
 	clientsMux.Unlock()
 
 	response["ResponseID"] = responseID
 
-	log.Println("Broadcasting message to the first WebSocket client")
 	BroadcastMessageToFirstNode(response)
 
-	log.Println("Waiting for response from WebSocket client...")
 	select {
 	case responseData := <-responseChannel:
-		log.Printf("Received response for ResponseID %s: %s\n", responseID, string(responseData))
 		return responseData, nil
 	case <-time.After(30 * time.Second): // Timeout after 30 seconds
-		log.Printf("Timeout while waiting for WebSocket response for ResponseID %s\n", responseID)
 		clientsMux.Lock()
 		delete(pendingRequests, responseID)
 		clientsMux.Unlock()

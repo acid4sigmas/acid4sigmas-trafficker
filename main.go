@@ -3,7 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"time"
@@ -11,12 +11,9 @@ import (
 )
 
 func DynamicRouter(w http.ResponseWriter, r *http.Request) {
-	log.Println("Received request in DynamicRouter")
-
 	requestMethod := r.Method
-	log.Printf("Request Method: %s\n", requestMethod)
 
-	body, err := ioutil.ReadAll(r.Body)
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		log.Println("Error reading request body:", err)
 		http.Error(w, "Failed to read body", http.StatusInternalServerError)
@@ -24,23 +21,24 @@ func DynamicRouter(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	log.Printf("Request Body: %s\n", string(body))
-
-	response := map[string]interface{}{
-		"RequestMethod": requestMethod,
-		"FullURL":       r.URL.Path,
-		"RequestBody":   string(body),
+	headers := make(map[string]string)
+	for key, value := range r.Header {
+		headers[key] = value[0]
 	}
 
-	log.Println("Calling HandleWebSocketRequest...")
+	response := map[string]interface{}{
+		"RequestMethod":  requestMethod,
+		"FullURL":        r.URL.Path,
+		"RequestBody":    string(body),
+		"RequestHeaders": headers,
+	}
+
 	responseData, err := websocket.HandleWebSocketRequest(response)
 	if err != nil {
 		log.Println("Error in HandleWebSocketRequest:", err)
 		http.Error(w, err.Error(), http.StatusGatewayTimeout)
 		return
 	}
-
-	log.Printf("Received response data: %s\n", string(responseData))
 
 	// Parse the response data to verify
 	var responsePayload map[string]interface{}
@@ -50,8 +48,6 @@ func DynamicRouter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Response Payload: %+v\n", responsePayload)
-
 	jsonResponse, err := json.Marshal(responsePayload)
 	if err != nil {
 		log.Println("Error creating JSON response:", err)
@@ -59,7 +55,6 @@ func DynamicRouter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Println("Sending JSON response to client")
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(jsonResponse)
 }
@@ -79,7 +74,7 @@ func main() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "index.html")
 	})
-	http.HandleFunc("/api", DynamicRouter)
+	http.HandleFunc("/api/", DynamicRouter)
 	http.HandleFunc("/ws", websocket.HandleConnection)
 
 	go func() {
